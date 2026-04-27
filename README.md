@@ -1,37 +1,46 @@
 # Real-Time People Counting System
 
-A computer-vision project that detects, tracks, and counts people in a video stream using **Ultralytics YOLO (YOLOv10)** and **OpenCV**.  
-The pipeline performs **person-only detection**, assigns **persistent track IDs**, and increments a counter when a person **crosses a virtual counting line**.
+A computer-vision project that detects, tracks, and counts people in a video using **Ultralytics YOLO (YOLOv10)** + **OpenCV**.  
+It performs **person-only tracking**, assigns **persistent IDs**, and counts a person when they **cross a configurable virtual counting line** (vertical or horizontal).
 
-> Main notebook: **`people_counting_system.ipynb`** (Google Colab-ready)
+> Main notebook: **`people_counting_system.ipynb`** (Google Colab GPU-friendly)
+
+---
+
+## What’s New / Current Logic (Notebook-Aligned)
+
+- Uses `model.track(..., tracker="bytetrack.yaml")` for more stable tracking
+- Supports **two counting modes** via `user_choice`:
+  - `user_choice = 0` → **vertical line** counting (x-direction crossing)
+  - `user_choice = 1` → **horizontal line** counting (y-direction crossing)
+- Uses a simple **track history** dictionary to detect an actual **crossing event**:
+  - stores previous `cx` or `cy` for each `track_id`
+  - increments count only when crossing happens (and only once per ID using `counted_ids`)
 
 ---
 
 ## Key Features
 
-- **Real-time person detection** using Ultralytics YOLO (pretrained weights)
-- **Multi-object tracking** with persistent IDs (`model.track(..., persist=True)`)
-- **Line-crossing based counting** (simple and effective baseline)
-- **Annotated output video** generation (`output_count.mp4`)
-- Person filtering via YOLO class selection (**class 0 = person**)
+- **Real-time person detection** with pretrained YOLOv10 weights (`yolov10n.pt`)
+- **Multi-object tracking** with persistent IDs
+- **Crossing-based counting** using previous vs current centroid position
+- **Annotated output video export** to `output_count.mp4`
+- Filters only the `person` class (`classes=[0]`)
 
 ---
 
 ## How It Works (High Level)
 
-1. **Load YOLOv10 model** (e.g., `yolov10n.pt`)
-2. **Read frames** from a video using OpenCV
-3. **Track people** in each frame:
-   - detect only class `person` (`classes=[0]`)
-   - retrieve bounding boxes + track IDs
-4. **Compute the centroid** of each tracked box
-5. **Count** a person when the centroid crosses the horizontal line (default: middle of the frame)
-6. **Render overlays**:
-   - centroids
-   - track IDs
-   - counting line
-   - total count
-7. **Write** annotated frames to `output_count.mp4`
+1. Load YOLOv10 model
+2. Read frames from a video with OpenCV
+3. Track persons with ByteTrack:
+   - `results = model.track(frame, persist=True, classes=[0], tracker="bytetrack.yaml")`
+4. For each tracked person:
+   - compute centroid `(cx, cy)`
+   - compare current centroid with previous centroid stored in `track_history`
+5. If the centroid **crosses the chosen line**, increase the counter once per ID
+6. Draw overlays (IDs, centroids, counting line, total count)
+7. Write frames to `output_count.mp4`
 
 ---
 
@@ -40,111 +49,98 @@ The pipeline performs **person-only detection**, assigns **persistent track IDs*
 - **Python**
 - **Ultralytics** (YOLO + tracking)
 - **OpenCV**
-- (Optional) **Google Colab** for GPU acceleration
+- **Google Colab** (optional, recommended for GPU)
 
 ---
 
 ## Repository Structure
 
-- `people_counting_system.ipynb` — main implementation notebook (install, run detection, tracking, counting, and video export)
+- `people_counting_system.ipynb` — complete pipeline (install → predict demo → video tracking → counting → export)
 
 ---
 
 ## Setup & Installation
 
 ### Option A — Run on Google Colab (Recommended)
-Open the notebook in Colab and run the cells in order.
+Open the notebook and run all cells in order.
 
-The notebook installs dependencies like this:
+The notebook installs:
 ```bash
 pip install ultralytics
 ```
 
 ### Option B — Run Locally
-1. Create a virtual environment (recommended)
-2. Install dependencies:
 ```bash
 pip install ultralytics opencv-python
 ```
 
-> Note: Tracking may require extra packages (e.g., `lap`). Ultralytics can auto-install missing requirements depending on your environment.
+> Note: Ultralytics tracking may require extra packages (e.g., `lap`). If missing, Ultralytics may auto-install them depending on your environment.
 
 ---
 
 ## Usage
 
-### 1) Load the YOLO model
-In the notebook, the model is initialized like:
+### 1) Load the model
 ```python
 from ultralytics import YOLO
 model = YOLO("yolov10n.pt")
 ```
 
-### 2) Provide your input video path
-Example used in the notebook:
+### 2) Set your input video path
+Example in the notebook:
 ```python
-video_path = "/content/walk.mp4"
+video_path = "/content/IMG_0628.mp4"
+cap = cv2.VideoCapture(video_path)
 ```
 
-### 3) Run tracking + counting
-Core logic (summary):
-- `model.track(frame, persist=True, classes=[0])`
-- keep a list of `counted_ids`
-- increment `count` when a track crosses the line
+### 3) Choose counting mode
+In the notebook:
+```python
+line_x = width // 2      # vertical line
+line_y = height // 2     # horizontal line
+user_choice = 0          # 0=vertical, 1=horizontal
+```
 
-### 4) Output
-The notebook writes an annotated video:
-- **Output file:** `output_count.mp4`
-- Includes the counting line and `Total People: N` overlay
+### 4) Run tracking + counting
+- `track_history` stores last centroid position per ID
+- `counted_ids` ensures each ID is counted only once
 
----
-
-## Configuration Tips
-
-You can easily tweak these parameters in the notebook:
-
-- **Counting line position**
-  - Currently: `line_y = height // 2` (middle of frame)
-  - Move up/down to match your scene layout
-
-- **Counting logic**
-  - Current baseline counts when `cy < line_y` and ID not counted yet  
-  - You can upgrade to “crossing direction” logic (top→bottom vs bottom→top) for better accuracy.
-
-- **Resolution / speed**
-  - Use smaller YOLO models (e.g., `yolov10n`) for faster inference
-  - Consider resizing frames for performance if needed
+### 5) Output
+- Output file: **`output_count.mp4`**
+- The rendered video includes:
+  - track IDs
+  - centroid markers
+  - counting line (vertical or horizontal)
+  - **Total People** overlay
 
 ---
 
-## Limitations (Current Baseline)
+## Notes / Limitations
 
-- The current counting rule is a **simple line condition**; depending on camera angle and movement direction, you may want a true **line-crossing event** (track history-based).
-- **Occlusion** (people overlapping) can cause ID switches and affect accuracy in crowded scenes.
-- Performance depends on hardware (GPU strongly recommended for real-time).
+- Current counting counts **one crossing per unique track ID**. If someone turns back and crosses again, they will not be counted again unless you reset logic.
+- In crowded scenes, occlusions can still cause **ID switches**, affecting counts.
+- Counting direction differs by mode:
+  - Vertical mode currently triggers on a **right → left** crossing of the vertical line.
+  - Horizontal mode currently triggers on a **top → bottom** crossing of the horizontal line.
+
+(These can be extended to support bidirectional IN/OUT counting.)
 
 ---
 
-## Future Improvements (Ideas)
+## Future Improvements (Optional Ideas)
 
-- Direction-aware counting (IN/OUT)
-- Region-of-interest masking (ignore irrelevant areas)
-- Tracking history trails for robust crossing detection
-- Export analytics (CSV logs: timestamp, ID, event)
-- Stream input support (webcam / RTSP)
+- Bidirectional counting (IN/OUT)
+- Use an `offset` tolerance near the line (already defined in notebook; can be applied to reduce jitter)
+- ROI masking to ignore irrelevant areas
+- Save events to CSV (time, ID, direction)
 
 ---
 
 ## Acknowledgements
 
-- [Ultralytics YOLO](https://github.com/ultralytics/ultralytics)
-- OpenCV community
-
----
-
-## License
-
-Add a license file if you plan to distribute this project publicly (e.g., MIT, Apache-2.0).
+- Ultralytics YOLO: https://github.com/ultralytics/ultralytics  
+- ByteTrack (via Ultralytics tracker configs)
+- OpenCV
 
 ---
 
